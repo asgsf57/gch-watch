@@ -3,3 +3,4 @@ config.env
 *.log
 com.*.gchwatch.plist
 DEPLOY.md
+tools/
