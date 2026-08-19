@@ -1,10 +1,12 @@
-name: GCH availability watch
+# A FAILED run means a room is OPEN. GitHub emails you on failure, which is the
+# point: it gives a reliable phone alert with no extra service or credentials.
+name: GCH watch (a FAILED run means a room is OPEN - book now)
 
 on:
   schedule:
     # Every 5 minutes. GitHub may delay scheduled runs under load.
     - cron: '*/5 * * * *'
-  workflow_dispatch:      # lets you trigger a check by hand
+  workflow_dispatch:
 
 concurrency:
   group: gch-watch
@@ -17,7 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check availability and push on a hit
+      - name: Check availability
+        id: check
         env:
           CHECK_IN:   ${{ secrets.CHECK_IN }}
           CHECK_OUT:  ${{ secrets.CHECK_OUT }}
@@ -27,8 +30,30 @@ jobs:
           CHILD_AGES: ${{ secrets.CHILD_AGES }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          # GitHub runs steps with `bash -e`, so capture the code without aborting.
-          # exit 0 = rooms available, 1 = sold out (normal), >1 = real failure.
+          # Steps run under `bash -e`, so capture the code without aborting.
+          # Script: 0 = rooms available, 1 = sold out, >1 = real failure.
           code=0
-          python3 gch_watch.py --once --no-voice --no-open --log /dev/null || code=$?
-          if [ "$code" -gt 1 ]; then exit "$code"; fi
+          python3 gch_watch.py --once --no-voice --no-open \
+            --log "$GITHUB_WORKSPACE/run.log" || code=$?
+
+          if [ "$code" -gt 1 ]; then
+            echo "::error::Checker failed - the Disney API may have changed."
+            { echo "## Checker error"; echo '```'; cat run.log; echo '```'; } \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 2
+          fi
+
+          if [ "$code" -eq 0 ]; then
+            { echo "# ROOMS AVAILABLE - BOOK NOW"
+              echo ""
+              echo "<https://disneyland.disney.go.com/hotels/grand-californian-hotel/rates-rooms/>"
+              echo ""
+              echo '```'; cat run.log; echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::ROOMS ARE AVAILABLE for your dates - go book now"
+            # Deliberate failure: this is what triggers GitHub's email to you.
+            exit 1
+          fi
+
+          echo "Sold out - nothing to do."
+          echo "Sold out as of this run." >> "$GITHUB_STEP_SUMMARY"
