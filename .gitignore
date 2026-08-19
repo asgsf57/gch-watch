@@ -1,0 +1,5 @@
+config.env
+.ntfy_topic
+*.log
+com.*.gchwatch.plist
+DEPLOY.md

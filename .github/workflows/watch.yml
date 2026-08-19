@@ -1,0 +1,34 @@
+name: GCH availability watch
+
+on:
+  schedule:
+    # Every 5 minutes. GitHub may delay scheduled runs under load.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:      # lets you trigger a check by hand
+
+concurrency:
+  group: gch-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check availability and push on a hit
+        env:
+          CHECK_IN:   ${{ secrets.CHECK_IN }}
+          CHECK_OUT:  ${{ secrets.CHECK_OUT }}
+          HOTEL:      ${{ secrets.HOTEL }}
+          ADULTS:     ${{ secrets.ADULTS }}
+          CHILDREN:   ${{ secrets.CHILDREN }}
+          CHILD_AGES: ${{ secrets.CHILD_AGES }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          # GitHub runs steps with `bash -e`, so capture the code without aborting.
+          # exit 0 = rooms available, 1 = sold out (normal), >1 = real failure.
+          code=0
+          python3 gch_watch.py --once --no-voice --no-open --log /dev/null || code=$?
+          if [ "$code" -gt 1 ]; then exit "$code"; fi
