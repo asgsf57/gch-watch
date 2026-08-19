@@ -187,6 +187,23 @@ def push(topic, title, message, click=None, priority="urgent"):
         return False
 
 
+def pushcut(url, title, message, click=None):
+    """Send via a Pushcut webhook URL. The URL embeds a secret - never log it."""
+    if not url:
+        return False
+    body = {"title": title, "text": message}
+    if click:
+        body["actions"] = [{"name": "Book now", "url": click}]
+    req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
 def say(text):
     if sys.platform == "darwin":
         subprocess.run(["say", text], check=False, capture_output=True)
@@ -242,6 +259,9 @@ def main():
     p.add_argument("--no-voice", action="store_true")
     p.add_argument("--ntfy-topic", default=os.environ.get("NTFY_TOPIC", ""),
                    help="ntfy.sh topic for phone push (or set NTFY_TOPIC)")
+    p.add_argument("--pushcut-url", default=os.environ.get("PUSHCUT_URL", ""),
+                   help="Pushcut webhook URL (or set PUSHCUT_URL). Contains a "
+                        "secret, so it is never printed.")
     p.add_argument("--log", default=os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "watch.log"))
     args = p.parse_args()
@@ -263,8 +283,9 @@ def main():
         % (args.hotel, stay, args.adults, args.children, left,
            args.tight_interval if left <= args.tighten_within else args.interval,
            args.tight_interval, args.tighten_within), args.log)
-    log("phone push: %s" % ("ntfy topic " + args.ntfy_topic
-                            if args.ntfy_topic else "OFF"), args.log)
+    log("alerts: ntfy=%s pushcut=%s"
+        % (args.ntfy_topic or "off",
+           "configured" if args.pushcut_url else "off"), args.log)
 
     last_state = None
     last_alert = 0.0
@@ -298,7 +319,13 @@ def main():
                           "%s\n\n%s\n\nTap to book." % (headline, "\n".join(lines)),
                           click=booking_url)
                 if args.ntfy_topic:
-                    log("phone push %s" % ("sent" if ok else "FAILED"), args.log)
+                    log("ntfy push %s" % ("sent" if ok else "FAILED"), args.log)
+                if args.pushcut_url:
+                    pc = pushcut(args.pushcut_url,
+                                 "GCH OPEN %s" % stay,
+                                 "%s\n\n%s" % (headline, "\n".join(lines)),
+                                 click=booking_url)
+                    log("pushcut %s" % ("sent" if pc else "FAILED"), args.log)
                 if not args.no_voice:
                     say("Grand Californian availability found. Book now.")
                 if (not args.no_open and last_state != "available"

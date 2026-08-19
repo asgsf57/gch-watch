@@ -29,6 +29,7 @@ jobs:
           CHILDREN:   ${{ secrets.CHILDREN }}
           CHILD_AGES: ${{ secrets.CHILD_AGES }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          PUSHCUT_URL: ${{ secrets.PUSHCUT_URL }}
         run: |
           # Steps run under `bash -e`, so capture the code without aborting.
           # Script: 0 = rooms available, 1 = sold out, >1 = real failure.
