@@ -257,6 +257,13 @@ def main():
     p.add_argument("--no-open", action="store_true",
                    help="do not auto-open the booking page on a hit")
     p.add_argument("--no-voice", action="store_true")
+    p.add_argument("--heartbeat-minutes", type=int, default=0,
+                   help="silent proof-of-life ping every N minutes (0=off)")
+    p.add_argument("--heartbeat-priority", default="min",
+                   help="ntfy priority for heartbeats once the loud period ends")
+    p.add_argument("--heartbeat-loud-until", default="",
+                   help="YYYY-MM-DD: until this date heartbeats are audible, "
+                        "then they drop to --heartbeat-priority automatically")
     p.add_argument("--ntfy-topic", default=os.environ.get("NTFY_TOPIC", ""),
                    help="ntfy.sh topic for phone push (or set NTFY_TOPIC)")
     p.add_argument("--pushcut-url", default=os.environ.get("PUSHCUT_URL", ""),
@@ -289,11 +296,14 @@ def main():
 
     last_state = None
     last_alert = 0.0
+    last_heartbeat = 0.0
+    checks = 0
     consecutive_errors = 0
 
     while True:
         state, detail = check(args.hotel, args.check_in, args.check_out,
                               args.adults, args.children, ages, args.accessible)
+        checks += 1
 
         if state == "available":
             consecutive_errors = 0
@@ -349,6 +359,27 @@ def main():
             if consecutive_errors == 5:
                 notify("GCH watcher problem",
                        "5 failed checks in a row - the API may have changed.")
+
+        # Silent proof-of-life. Only while sold out - a real opening alerts
+        # loudly on its own and a heartbeat would just muddy it.
+        now = time.time()
+        if (args.heartbeat_minutes and state == "sold_out"
+                and now - last_heartbeat >= args.heartbeat_minutes * 60):
+            stamp = datetime.now().strftime("%-I:%M %p")
+            loud = (args.heartbeat_loud_until
+                    and days_until(args.heartbeat_loud_until) >= 0)
+            prio = "default" if loud else args.heartbeat_priority
+            note = ""
+            if loud:
+                left = days_until(args.heartbeat_loud_until)
+                note = ("\n\n(Audible check-in. Goes silent after %s - "
+                        "%d day(s) left.)" % (args.heartbeat_loud_until, left))
+            push(args.ntfy_topic, "Watcher alive - no rooms yet",
+                 "Still sold out for %s.\nLast checked %s. %d checks since start.%s"
+                 % (stay, stamp, checks, note),
+                 priority=prio)
+            last_heartbeat = now
+            log("heartbeat sent (%s)" % ("audible" if loud else "silent"), args.log)
 
         last_state = state
         if args.once:
