@@ -31,7 +31,8 @@ jobs:
           ADULTS:     ${{ secrets.ADULTS }}
           CHILDREN:   ${{ secrets.CHILDREN }}
           CHILD_AGES: ${{ secrets.CHILD_AGES }}
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC:  ${{ secrets.NTFY_TOPIC }}
+          MAX_NIGHTLY: ${{ secrets.MAX_NIGHTLY }}
           PUSHCUT_URL: ${{ secrets.PUSHCUT_URL }}
         run: |
           # Steps run under `bash -e`, so capture the code without aborting.

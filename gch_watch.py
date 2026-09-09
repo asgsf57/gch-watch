@@ -257,6 +257,10 @@ def main():
     p.add_argument("--no-open", action="store_true",
                    help="do not auto-open the booking page on a hit")
     p.add_argument("--no-voice", action="store_true")
+    p.add_argument("--max-nightly", type=float,
+                   default=float(env("MAX_NIGHTLY", "0")),
+                   help="only alert for rooms at or under this nightly rate "
+                        "before tax (0 = no cap)")
     p.add_argument("--heartbeat-minutes", type=int, default=0,
                    help="silent proof-of-life ping every N minutes (0=off)")
     p.add_argument("--heartbeat-priority", default="min",
@@ -295,6 +299,9 @@ def main():
            "configured" if args.pushcut_url else "off"), args.log)
 
     last_state = None
+    last_alert_state = "quiet"
+    alertable = False
+    quiet_reason = "Starting up."
     last_alert = 0.0
     last_heartbeat = 0.0
     checks = 0
@@ -307,16 +314,37 @@ def main():
 
         if state == "available":
             consecutive_errors = 0
-            rooms = summarize(detail, names)
-            headline = "%d room type%s open for %s" % (
-                len(rooms), "" if len(rooms) == 1 else "s", stay)
-            log("*** AVAILABLE *** " + headline, args.log)
-            for name, nightly, total in rooms:
-                log("      %-34s $%s/night   $%s total w/ tax"
-                    % (name, format(nightly, ",.0f"), format(total, ",.2f")), args.log)
+            all_rooms = summarize(detail, names)
+            cap = args.max_nightly
+            rooms = [r for r in all_rooms if not cap or r[1] <= cap]
+            over = [r for r in all_rooms if cap and r[1] > cap]
+
+            for name, nightly, total in all_rooms:
+                log("      %-34s $%s/night   $%s total w/ tax%s"
+                    % (name, format(nightly, ",.0f"), format(total, ",.2f"),
+                       "   [OVER $%s CAP]" % format(cap, ",.0f")
+                       if cap and nightly > cap else ""), args.log)
+
+            if not rooms:
+                # Rooms exist but every one is above the cap. Not worth waking
+                # anyone for, so treat it like sold out for alerting purposes.
+                log("open but all %d over the $%s/night cap - not alerting"
+                    % (len(over), format(cap, ",.0f")), args.log)
+                alertable = False
+                quiet_reason = ("Only over-budget rooms open (cheapest %s at "
+                                "$%s/night, cap is $%s)."
+                                % (over[0][0], format(over[0][1], ",.0f"),
+                                   format(cap, ",.0f")))
+            else:
+                alertable = True
+                headline = "%d room type%s under $%s/night for %s" % (
+                    len(rooms), "" if len(rooms) == 1 else "s",
+                    format(cap, ",.0f") if cap else "any", stay)
+                log("*** AVAILABLE *** " + headline, args.log)
 
             now = time.time()
-            if last_state != "available" or now - last_alert >= args.remind_every:
+            if alertable and (last_alert_state != "alertable"
+                              or now - last_alert >= args.remind_every):
                 cheapest = rooms[0] if rooms else None
                 body = ("%s from $%s/night. Book now."
                         % (rooms[0][0], format(cheapest[1], ",.0f"))) if cheapest else headline
@@ -347,6 +375,8 @@ def main():
                 last_alert = now
 
         elif state == "sold_out":
+            alertable = False
+            quiet_reason = "Still sold out for %s." % stay
             consecutive_errors = 0
             if last_state != "sold_out":
                 log("sold out for %s (will keep checking)" % stay, args.log)
@@ -354,6 +384,8 @@ def main():
                 log("still sold out", args.log)
 
         else:
+            alertable = False
+            quiet_reason = "Checker hit an error on the last run."
             consecutive_errors += 1
             log("ERROR (%d in a row): %s" % (consecutive_errors, detail), args.log)
             if consecutive_errors == 5:
@@ -363,7 +395,7 @@ def main():
         # Silent proof-of-life. Only while sold out - a real opening alerts
         # loudly on its own and a heartbeat would just muddy it.
         now = time.time()
-        if (args.heartbeat_minutes and state == "sold_out"
+        if (args.heartbeat_minutes and not alertable
                 and now - last_heartbeat >= args.heartbeat_minutes * 60):
             stamp = datetime.now().strftime("%-I:%M %p")
             loud = (args.heartbeat_loud_until
@@ -374,16 +406,17 @@ def main():
                 left = days_until(args.heartbeat_loud_until)
                 note = ("\n\n(Audible check-in. Goes silent after %s - "
                         "%d day(s) left.)" % (args.heartbeat_loud_until, left))
-            push(args.ntfy_topic, "Watcher alive - no rooms yet",
-                 "Still sold out for %s.\nLast checked %s. %d checks since start.%s"
-                 % (stay, stamp, checks, note),
+            push(args.ntfy_topic, "Watcher alive - nothing in budget",
+                 "%s\nLast checked %s. %d checks since start.%s"
+                 % (quiet_reason, stamp, checks, note),
                  priority=prio)
             last_heartbeat = now
             log("heartbeat sent (%s)" % ("audible" if loud else "silent"), args.log)
 
         last_state = state
+        last_alert_state = "alertable" if alertable else "quiet"
         if args.once:
-            return 0 if state == "available" else 1
+            return 0 if alertable else 1
 
         left = days_until(args.check_in)
         base = args.tight_interval if left <= args.tighten_within else args.interval
