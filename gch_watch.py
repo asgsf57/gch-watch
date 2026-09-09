@@ -165,14 +165,15 @@ def notify(title, message, sound=True, repeat=1):
             time.sleep(1.5)
 
 
-def push(topic, title, message, click=None, priority="urgent"):
+def push(topic, title, message, click=None, priority="urgent",
+         tags="hotel,rotating_light"):
     """Send a phone push via ntfy.sh. Returns True on success."""
     if not topic:
         return False
     hdrs = {
         "Title": title.encode("ascii", "ignore").decode(),
         "Priority": priority,
-        "Tags": "hotel,rotating_light",
+        "Tags": tags,
         "Content-Type": "text/plain; charset=utf-8",
     }
     if click:
@@ -355,7 +356,7 @@ def main():
                 ok = push(args.ntfy_topic,
                           "GCH OPEN %s" % stay,
                           "%s\n\n%s\n\nTap to book." % (headline, "\n".join(lines)),
-                          click=booking_url)
+                          click=booking_url, tags="green_heart")
                 if args.ntfy_topic:
                     log("ntfy push %s" % ("sent" if ok else "FAILED"), args.log)
                 if args.pushcut_url:
@@ -409,7 +410,7 @@ def main():
             push(args.ntfy_topic, "Watcher alive - nothing in budget",
                  "%s\nLast checked %s. %d checks since start.%s"
                  % (quiet_reason, stamp, checks, note),
-                 priority=prio)
+                 priority=prio, tags="eyes")
             last_heartbeat = now
             log("heartbeat sent (%s)" % ("audible" if loud else "silent"), args.log)
 
