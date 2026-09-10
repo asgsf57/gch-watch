@@ -1,6 +1,7 @@
-# A FAILED run means a room is OPEN. GitHub emails you on failure, which is the
-# point: it gives a reliable phone alert with no extra service or credentials.
-name: GCH watch (a FAILED run means a room is OPEN - book now)
+# Alerts go out over ntfy/Pushcut from the checker itself. A run only FAILS -
+# and so only emails you - when something is actually wrong: the checker broke,
+# or a room opened up and the push didn't make it out.
+name: GCH watch
 
 on:
   schedule:
@@ -36,7 +37,7 @@ jobs:
           PUSHCUT_URL: ${{ secrets.PUSHCUT_URL }}
         run: |
           # Steps run under `bash -e`, so capture the code without aborting.
-          # Script: 0 = rooms available, 1 = sold out, >1 = real failure.
+          # Script: 0 = rooms in budget, 1 = nothing to alert on, >1 = real failure.
           code=0
           python3 gch_watch.py --once --no-voice --no-open \
             --log "$GITHUB_WORKSPACE/run.log" || code=$?
@@ -55,10 +56,17 @@ jobs:
               echo ""
               echo '```'; cat run.log; echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::ROOMS ARE AVAILABLE for your dates - go book now"
-            # Deliberate failure: this is what triggers GitHub's email to you.
-            exit 1
+
+            # The push is the alert. Fall back to a failing run (and its
+            # email) only if no push channel confirmed a send - either one
+            # reported FAILED, or none was configured at all.
+            if ! grep -qE '(ntfy push|pushcut) sent' run.log; then
+              echo "::error::ROOMS AVAILABLE and no push got out - book now"
+              exit 1
+            fi
+            echo "Rooms available - push sent."
+            exit 0
           fi
 
-          echo "Sold out - nothing to do."
-          echo "Sold out as of this run." >> "$GITHUB_STEP_SUMMARY"
+          echo "Nothing to alert on."
+          echo "Nothing in budget as of this run." >> "$GITHUB_STEP_SUMMARY"
